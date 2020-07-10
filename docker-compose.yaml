@@ -1,0 +1,130 @@
+version: '3.7'
+
+services:
+
+  elasticsearch:
+    image: elasticsearch:7.4.0
+    restart: on-failure
+    container_name: elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - discovery.seed_hosts=elasticsearch,elasticsearch-cluster
+      - cluster.initial_master_nodes=elasticsearch,elasticsearch-cluster
+      - cluster.name=docker-cluster
+      # - bootstrap.memory_lock=true
+      # - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data01:/usr/share/elasticsearch/data
+    # volumes:
+    #   - ./scripts/docker/elasticsearch:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+      - 9300:9300
+    networks:
+      - api-network-driver
+
+  elasticsearch-cluster:
+    image: elasticsearch:7.4.0
+    container_name: elasticsearch-cluster
+    environment:
+      - node.name=elasticsearch-cluster
+      - discovery.seed_hosts=elasticsearch,elasticsearch-cluster
+      - cluster.initial_master_nodes=elasticsearch,elasticsearch-cluster
+      - cluster.name=docker-cluster
+      # - bootstrap.memory_lock=true
+      # - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data02:/usr/share/elasticsearch/data        
+    # volumes:
+    #   - ./scripts/docker/elasticsearch:/usr/share/elasticsearch/data
+    networks:
+      - api-network-driver
+
+  kibana:
+    image: kibana:7.4.0
+    container_name: kibana
+    restart: on-failure
+    ports:
+      - 5601:5601
+    depends_on:
+      - elasticsearch
+    environment:
+      SERVER_NAME: localhost
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    networks:
+      - api-network-driver
+
+  logstash:
+    image: logstash:7.4.0
+    container_name: logstash
+    restart: always
+    volumes:
+      - ./scripts/docker/logstash/logstash.conf:/etc/logstash/conf.d/logstash.conf:ro
+    depends_on:
+      - elasticsearch
+    ports:
+      - "5400:5400"
+      - "9600:9600"
+    command: logstash -f /etc/logstash/conf.d/logstash.conf
+    networks:
+      - api-network-driver
+
+  api-example:
+    image: api-example
+    # container_name: api-example
+    build:
+      context: ./api-example
+      dockerfile: dockerfile
+    environment:
+      WAIT_HOSTS: elasticsearch:9200, elasticsearch:9300, kibana:5601, logstash:9600
+      PORT: 3001
+    restart: on-failure
+    # ports:
+    #   - "3000-3010:3000"
+    expose:
+      - "3001"
+    depends_on:
+      - elasticsearch
+      - logstash
+      - kibana
+    networks: 
+      - api-network-driver
+
+  api-push:
+    image: api-push
+    container_name: api-push
+    build:
+      context: ./api-example
+      dockerfile: dockerfile
+    environment:
+      WAIT_HOSTS: elasticsearch:9200, elasticsearch:9300, kibana:5601, logstash:9600
+    restart: on-failure
+    ports:
+      - "3000:3000"
+    depends_on:
+      - elasticsearch
+      - logstash
+      - kibana
+    networks: 
+      - api-network-driver
+
+volumes:
+  data01:
+    driver: local
+  data02:
+    driver: local
+
+networks:
+  api-network-driver:
+     name: api-network-driver
+     ipam:
+      config:
+        -  subnet: 192.168.0.1/24
